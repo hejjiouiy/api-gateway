@@ -3,8 +3,10 @@ from fastapi.responses import RedirectResponse, JSONResponse
 from jose import jwt, JWTError
 import httpx
 from typing import List, Optional
+from utils import RateLimiter
 
 app = FastAPI()
+rate_limiter = RateLimiter()
 
 # Keycloak configuration
 keycloak_config = {
@@ -17,8 +19,8 @@ keycloak_config = {
 
 
 SERVICE_MAP = {
-    "missions": "http://localhost:8050",
-    "achats": "http://localhost:8051",
+    "mission": "http://localhost:8050",
+    "achat": "http://localhost:8051",
     "stock": "http://localhost:8052"
 }
 
@@ -79,15 +81,24 @@ async def validate_token(token):
 
 # Function to verify token and extract user info
 async def get_current_user(request: Request):
+    # Try to get token from cookies
     token = request.cookies.get("access_token")
+
+    # If not found, try to get token from Authorization header
+    if not token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Not authenticated"
+            detail="Not authenticated",
+            headers={"WWW-Authenticate": "Bearer"},
         )
 
     try:
-        # Get the JWKS (JSON Web Key Set) from Keycloak
+        # Validate JWT
         payload = await validate_token(token)
         return payload
     except JWTError as e:
@@ -95,6 +106,7 @@ async def get_current_user(request: Request):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Invalid token: {str(e)}"
         )
+
 
 
 # Helper function to check if user has specific roles
@@ -120,8 +132,14 @@ async def root():
 
 # Login endpoint - redirects to Keycloak login page
 @app.get("/login")
-async def login():
+async def login(request: Request):
+    client_ip = request.client.host
     oidc_config = await get_oidc_config()
+    if not rate_limiter.check(f"login:{client_ip}", limit=3, window=60):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Please try again later."
+        )
     auth_url = (
         f"{oidc_config['authorization_endpoint']}"
         f"?client_id={keycloak_config['client_id']}"
@@ -177,7 +195,13 @@ async def callback(code: str):
 
 # Profile endpoint - shows user information
 @app.get("/profile")
-async def profile(user: dict = Depends(get_current_user)):
+async def profile(request:Request,user: dict = Depends(get_current_user)):
+    # client_ip = request.client.host
+    # if not rate_limiter.check(f"profile:{client_ip}", limit=10, window=60):
+    #     raise HTTPException(
+    #         status_code=429,
+    #         detail="Too many accessing requests , please try again later."
+    #     )
     return {
         "message": "You are authenticated",
         "user_info": {
@@ -283,6 +307,12 @@ async def get_token(request: Request) -> str:
     Extract the access token from the request cookies or authorization header.
     Returns the token or raises an HTTPException if no token is found.
     """
+    client_ip = request.client.host
+    if not rate_limiter.check(f"login:{client_ip}", limit=10, window=60):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many accessing requests , please try again later."
+        )
     # First try to get token from cookies
     token = request.cookies.get("access_token")
 
@@ -305,8 +335,15 @@ async def get_token(request: Request) -> str:
 # Function to verify token validity
 @app.get("/verify-token")
 async def verify_token_endpoint(
+    request: Request,
     token: Optional[str] = Depends(get_token)
 ):
+    client_ip = request.client.host
+    if not rate_limiter.check(f"login:{client_ip}", limit=10, window=60):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many accessing requests , please try again later."
+        )
     try:
         # Retrieve OIDC config and JWKS if not already cached
         if not hasattr(app.state, "jwks"):
@@ -344,23 +381,81 @@ async def verify_token_endpoint(
             detail=f"Invalid token: {str(e)}")
 
 
-
 @app.api_route("/{service}/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"])
-async def proxy(service: str, path: str, request: Request, user=Depends(get_current_user)) :
+async def proxy(service: str, path: str, request: Request, user=Depends(get_current_user)):
     if service not in SERVICE_MAP:
-        raise HTTPException(status_code=404, detail="Service not found")
+        raise HTTPException(status_code=404, detail=f"Service '{service}' not found")
 
-    url= f"{SERVICE_MAP[service]}/{path}"
+    url = f"{SERVICE_MAP[service]}/{path}"
+
+
+    # Filter and prepare headers
     headers = dict(request.headers)
+    # Remove headers that should be set by the client library or might cause conflicts
+    headers_to_remove = ["host", "content-length", "connection"]
+    for header in headers_to_remove:
+        if header in headers:
+            del headers[header]
+
+    # Add user context headers for the downstream service
+    headers["X-User-ID"] = user.get("sub", "")
+    headers["X-User-Email"] = user.get("email", "")
+    headers["X-User-Roles"] = ",".join(user.get("realm_access", {}).get("roles", []))
 
     method = request.method
-    body = await request.json() if method in ["POST", "PUT", "PATCH"] else None
-    async with httpx.AsyncClient() as client:
-        response = await client.request(method, url, content=body, headers=headers)
 
-    return Response(
-        content=response.content,
-        status_code=response.status_code,
-        headers=dict(response.headers),
-        media_type=response.headers.get("content-type")
-    )
+    # Handle different content types appropriately
+    content = None
+    if method in ["POST", "PUT", "PATCH"]:
+        content_type = request.headers.get("content-type", "")
+        try:
+            if "application/json" in content_type:
+                content = await request.json()
+            elif "application/x-www-form-urlencoded" in content_type:
+                form = await request.form()
+                content = dict(form)
+            elif "multipart/form-data" in content_type:
+                form = await request.form()
+                content = dict(form)
+            else:
+                # For other content types, pass the raw body
+                content = await request.body()
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Error parsing request body: {str(e)}"
+            )
+    print(url, headers, method, content)
+    # Set reasonable timeouts
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.request(
+                method,
+                url,
+                content=content,
+                headers=headers,
+                follow_redirects=True
+            )
+
+        # Return the response from the microservice
+        return Response(
+            content=response.content,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type=response.headers.get("content-type")
+        )
+    except httpx.TimeoutException:
+        raise HTTPException(
+            status_code=504,
+            detail=f"Service '{service}' timed out"
+        )
+    except httpx.ConnectError:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Service '{service}' is unavailable"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error forwarding request: {str(e)}"
+        )
