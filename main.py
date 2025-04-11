@@ -4,6 +4,7 @@ from jose import jwt, JWTError
 import httpx
 from typing import List, Optional
 from utils import RateLimiter
+from utils import generate_internal_token
 
 app = FastAPI()
 rate_limiter = RateLimiter()
@@ -401,6 +402,9 @@ async def proxy(service: str, path: str, request: Request, user=Depends(get_curr
     headers["X-User-ID"] = user.get("sub", "")
     headers["X-User-Email"] = user.get("email", "")
     headers["X-User-Roles"] = ",".join(user.get("realm_access", {}).get("roles", []))
+    token = generate_internal_token()
+    headers["X-Internal-Gateway-Key"] = token
+
 
     method = request.method
 

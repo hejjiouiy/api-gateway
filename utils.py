@@ -1,5 +1,8 @@
 import time
 from collections import defaultdict
+import os
+import jwt
+from dotenv import load_dotenv
 
 
 # Simple in-memory rate limiter
@@ -30,3 +33,17 @@ class RateLimiter:
         # Add current request
         self.requests[key].append(now)
         return True
+
+
+
+
+
+load_dotenv()
+SECRET = os.getenv("INTERNAL_JWT_SECRET")
+
+def generate_internal_token():
+    payload = {
+        "iss": "api-gateway",
+        "exp": int(time.time()) + 300  # expire dans 5 minutes
+    }
+    return jwt.encode(payload, SECRET, algorithm="HS256")
