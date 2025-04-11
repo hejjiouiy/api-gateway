@@ -1,0 +1,11 @@
+Metadata-Version: 2.4
+Name: keycloak_auth
+Version: 0.1.0
+Summary: Shared Keycloak auth logic for FastAPI microservices
+Author: Your Name
+Requires-Dist: fastapi
+Requires-Dist: python-jose
+Requires-Dist: httpx
+Dynamic: author
+Dynamic: requires-dist
+Dynamic: summary

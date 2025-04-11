@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "fastapi_keycloak_auth"
+version = "0.1.0"
+description = "Shared FastAPI authentication with Keycloak"
+authors = ["Ton Nom <email@example.com>"]
+packages = [{ include = "fastapi_keycloak_auth" }]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+fastapi = "*"
+python-jose = "*"
+starlette = "*"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
