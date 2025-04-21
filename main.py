@@ -8,13 +8,12 @@ from utils import generate_internal_token
 
 app = FastAPI()
 rate_limiter = RateLimiter()
-
 # Keycloak configuration
 keycloak_config = {
     "server_url": "http://localhost:8070",
-    "realm": "myrealm",  # Use your realm name
-    "client_id": "fastapi-client",  # Use your client ID
-    "client_secret": "xJYnqlqx2ghUDJWcNjW3n156BLqYt3lN",  # Use your client secret
+    "realm": "fms",  # Use your realm name
+    "client_id": "portal",  # Use your client ID
+    "client_secret": "bHqf5pjOUnyBv95kr1NThuWkfWR5lQDl",  # Use your client secret
     "callback_uri": "http://localhost:8000/callback"
 }
 
@@ -298,7 +297,31 @@ async def refresh_token(request: Request):
     return redirect
 
 
+@app.get("/header-token")
+async def get_header_token(request: Request):
+    client_ip = request.client.host
+    if not rate_limiter.check(f"login:{client_ip}", limit=10, window=60):
+        raise HTTPException(
+            status_code=429,
+            detail="Too many accessing requests , please try again later."
+        )
+    # First try to get token from cookies
+    access_token = request.cookies.get("access_token")
 
+    # If not in cookies, check authorization header
+    if not access_token:
+        auth_header = request.headers.get("Authorization")
+        if auth_header and auth_header.startswith("Bearer "):
+            access_token = auth_header.split(" ")[1]
+
+    if not access_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No authentication token provided",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+    token = generate_internal_token()
+    return token
 
 
 # Function to extract the access token from request
