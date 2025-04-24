@@ -1,3 +1,5 @@
+from functools import lru_cache
+
 from fastapi import FastAPI, Depends, HTTPException, Request, status, Response
 from fastapi.responses import RedirectResponse, JSONResponse
 from jose import jwt, JWTError
@@ -296,6 +298,9 @@ async def refresh_token(request: Request):
     )
     return redirect
 
+@lru_cache(maxsize=1)
+def get_static_token():
+    return generate_internal_token()
 
 @app.get("/header-token")
 async def get_header_token(request: Request):
@@ -425,6 +430,7 @@ async def proxy(service: str, path: str, request: Request, user=Depends(get_curr
     headers["X-User-ID"] = user.get("sub", "")
     headers["X-User-Email"] = user.get("email", "")
     headers["X-User-Roles"] = ",".join(user.get("realm_access", {}).get("roles", []))
+    headers["X-User-Name"] = user.get("name","")
     token = generate_internal_token()
     headers["X-Internal-Gateway-Key"] = token
 

@@ -44,6 +44,6 @@ SECRET = os.getenv("INTERNAL_JWT_SECRET")
 def generate_internal_token():
     payload = {
         "iss": "api-gateway",
-        "exp": int(time.time()) + 300  # expire dans 5 minutes
+        "exp": int(time.time()) + 900  # expire dans 5 minutes
     }
     return jwt.encode(payload, SECRET, algorithm="HS256")
