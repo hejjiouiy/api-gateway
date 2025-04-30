@@ -7,6 +7,7 @@ import httpx
 from typing import List, Optional
 from utils import RateLimiter
 from utils import generate_internal_token
+from tenacity import retry, wait_exponential, stop_after_attempt
 
 app = FastAPI()
 rate_limiter = RateLimiter()
@@ -28,6 +29,7 @@ SERVICE_MAP = {
 
 
 # Function to get OIDC configuration from Keycloak
+#@retry(wait=wait_exponential(), stop=stop_after_attempt(5))
 async def get_oidc_config():
     if not hasattr(app.state, "oidc_config"):
         async with httpx.AsyncClient() as client:
@@ -82,6 +84,7 @@ async def validate_token(token):
 
 
 # Function to verify token and extract user info
+#@retry(wait=wait_exponential(), stop=stop_after_attempt(5))
 async def get_current_user(request: Request):
     # Try to get token from cookies
     token = request.cookies.get("access_token")
