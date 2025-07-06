@@ -2,7 +2,6 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/../GesionMissions/.idea/GestionMissions.iml" filepath="$PROJECT_DIR$/../GesionMissions/.idea/GestionMissions.iml" />
       <module fileurl="file://$PROJECT_DIR$/.idea/Keycloak_app.iml" filepath="$PROJECT_DIR$/.idea/Keycloak_app.iml" />
     </modules>
   </component>
